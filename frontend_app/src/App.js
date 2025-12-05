@@ -1,42 +1,67 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './App.css';
 
-/*
-  Ocean Professional Theme:
-  Primary: #2563EB (blue), Secondary: #F59E0B (amber), Error: #EF4444,
-  Background: #f9fafb, Surface: #ffffff, Text: #111827,
-  Gradient: from-blue-500/10 to-gray-50
-*/
+import Editor from './components/Editor';
+import TypewriterDisplay from './components/TypewriterDisplay';
+import TypewriterControls from './components/TypewriterControls';
+import { saveToLocalStorage, loadFromLocalStorage, removeFromLocalStorage } from './utils/localStorage';
 
+// Optionally, you could use './hooks/useTypewriter', but we preserve similar logic inline for full control
 const STORAGE_KEY = 'tw_text';
-
-const DEFAULT_TYPE_SPEED = 40;  // ms per character
+const STORAGE_SPEED_KEY = 'tw_speed';
+const DEFAULT_TYPE_SPEED = 40; // ms per character
 const MIN_TYPE_SPEED = 15;
 const MAX_TYPE_SPEED = 150;
 const CARET_BLINK_MS = 480;
 
-// Helpers for env - uses REACT_APP_* if available, else fallback
 function getEnvVar(key, fallback) {
   return process.env[key] !== undefined ? process.env[key] : fallback;
 }
 
 // PUBLIC_INTERFACE
 function App() {
-  // Editor state
   const [text, setText] = useState('');
-  // Typewriter display state
+  const [typeSpeed, setTypeSpeed] = useState(DEFAULT_TYPE_SPEED);
   const [displayed, setDisplayed] = useState('');
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [typeSpeed, setTypeSpeed] = useState(DEFAULT_TYPE_SPEED);
   const [caretVisible, setCaretVisible] = useState(true);
   const [status, setStatus] = useState('');
-  const [statusType, setStatusType] = useState(''); // 'success', 'error', 'info'
+  const [statusType, setStatusType] = useState('');
   const timerRef = useRef(null);
   const caretRef = useRef(null);
 
-  // -- Effect: Typewriter Animation --
+  // Health check to backend, if REACT_APP_BACKEND_URL set (optional, non-blocking)
   useEffect(() => {
+    const backendUrl = getEnvVar('REACT_APP_BACKEND_URL', '');
+    if (backendUrl) {
+      fetch(`${backendUrl.replace(/\/$/, '')}/health/`)
+        .then(() => {}) // ignore
+        .catch(() => {}); // ignore
+    }
+  }, []);
+
+  // On mount: restore text and speed from storage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = loadFromLocalStorage(STORAGE_KEY);
+      setText(saved);
+      const speed = Number(loadFromLocalStorage(STORAGE_SPEED_KEY) || DEFAULT_TYPE_SPEED);
+      setTypeSpeed(
+        isNaN(speed) ? DEFAULT_TYPE_SPEED : Math.max(MIN_TYPE_SPEED, Math.min(speed, MAX_TYPE_SPEED))
+      );
+    }
+  }, []);
+
+  // Caret blink
+  useEffect(() => {
+    caretRef.current = setInterval(() => setCaretVisible(v => !v), CARET_BLINK_MS);
+    return () => clearInterval(caretRef.current);
+  }, []);
+
+  // Typewriter animation
+  useEffect(() => {
+    // only animate if playing and index < text.length
     if (playing && index < text.length) {
       timerRef.current = setTimeout(() => {
         setDisplayed((prev) => prev + text[index]);
@@ -52,20 +77,14 @@ function App() {
     };
   }, [playing, index, text, typeSpeed]);
 
-  // -- Caret blink effect --
-  useEffect(() => {
-    caretRef.current = setInterval(() => setCaretVisible(v => !v), CARET_BLINK_MS);
-    return () => clearInterval(caretRef.current);
-  }, []);
-
-  // -- When text changes: reset typewriter state
+  // Reset animation when text changes
   useEffect(() => {
     setDisplayed('');
     setIndex(0);
     setPlaying(false);
   }, [text]);
 
-  // -- Status messages auto-clear
+  // Status messages auto-clear
   useEffect(() => {
     if (status) {
       const timer = setTimeout(() => setStatus(''), 1700);
@@ -73,40 +92,39 @@ function App() {
     }
   }, [status]);
 
-  // Controls
+  // Actions
+  const handleEdit = (e) => setText(e.target.value);
+
   const handleSave = () => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, text);
+    if (saveToLocalStorage(STORAGE_KEY, text)) {
+      saveToLocalStorage(STORAGE_SPEED_KEY, String(typeSpeed));
       setStatus('Saved!');
       setStatusType('success');
-    } catch (err) {
+    } else {
       setStatus('Could not save');
       setStatusType('error');
     }
   };
   const handleLoad = () => {
-    try {
-      const loaded = window.localStorage.getItem(STORAGE_KEY) || '';
-      setText(loaded);
-      setStatus('Loaded.');
-      setStatusType('info');
-    } catch (err) {
-      setStatus('Could not load');
-      setStatusType('error');
-    }
+    setText(loadFromLocalStorage(STORAGE_KEY));
+    setTypeSpeed(
+      Math.max(
+        MIN_TYPE_SPEED,
+        Math.min(Number(loadFromLocalStorage(STORAGE_SPEED_KEY) || DEFAULT_TYPE_SPEED), MAX_TYPE_SPEED)
+      )
+    );
+    setStatus('Loaded.');
+    setStatusType('info');
   };
   const handleClear = () => {
     setText('');
     setDisplayed('');
     setIndex(0);
     setPlaying(false);
-    window.localStorage.removeItem(STORAGE_KEY);
+    removeFromLocalStorage(STORAGE_KEY);
+    removeFromLocalStorage(STORAGE_SPEED_KEY);
     setStatus('Cleared.');
     setStatusType('info');
-  };
-
-  const handleEdit = (e) => {
-    setText(e.target.value);
   };
 
   const handleTypewriterPlay = () => {
@@ -114,70 +132,17 @@ function App() {
     setIndex(0);
     setPlaying(true);
   };
-
-  const handlePause = () => {
+  const handlePause = () => setPlaying(false);
+  const handleReset = () => {
+    setDisplayed('');
+    setIndex(0);
     setPlaying(false);
   };
-
   const handleSpeedChange = (e) => {
-    setTypeSpeed(Number(e.target.value));
+    const value = Number(e.target.value);
+    setTypeSpeed(value);
+    saveToLocalStorage(STORAGE_SPEED_KEY, String(value));
   };
-
-  // Theme colors for button styles from Ocean Professional
-  const btnPrimary = {
-    background: 'linear-gradient(90deg, #2563EB, #3181f7 92%)',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '8px',
-    boxShadow: '0 2px 8px rgba(37,99,235,0.07)',
-    padding: '11px 22px',
-    fontWeight: 600,
-    fontSize: '1em',
-    marginRight: 12,
-    cursor: 'pointer',
-    transition: 'opacity .2s, box-shadow .2s',
-  };
-  const btnSecondary = {
-    background: 'linear-gradient(90deg, #F59E0B, #fde68a 90%)',
-    color: '#111827',
-    border: 'none',
-    borderRadius: '8px',
-    boxShadow: '0 2px 8px rgba(245,158,11,0.09)',
-    padding: '11px 22px',
-    fontWeight: 600,
-    fontSize: '1em',
-    marginRight: 12,
-    cursor: 'pointer',
-    transition: 'opacity .2s, box-shadow .2s',
-  };
-  const btnClear = {
-    background: 'linear-gradient(90deg, #EF4444, #fca5a5 90%)',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '8px',
-    padding: '11px 22px',
-    fontWeight: 600,
-    fontSize: '1em',
-    marginRight: 0,
-    boxShadow: '0 2px 8px rgba(239,68,68,0.09)',
-    cursor: 'pointer',
-    transition: 'opacity .2s, box-shadow .2s',
-  };
-  // Compose Caret for animated display
-  const Caret = () => (
-    <span
-      style={{
-        opacity: caretVisible ? 1 : 0,
-        borderLeft: '2px solid #2563EB',
-        marginLeft: 1,
-        height: '1.2em',
-        display: 'inline-block',
-        verticalAlign: 'bottom',
-        animation: 'none',
-      }}
-      aria-hidden="true"
-    >&#8203;</span>
-  );
 
   // -- Main Render --
   return (
@@ -231,139 +196,90 @@ function App() {
         alignItems: 'stretch',
         background: 'transparent'
       }}>
-        {/* Editor */}
-        <fieldset style={{
-          border: 'none',
-          margin: '0 0 15px 0',
-          padding: 0,
-          borderRadius: 14,
-          boxShadow: '0 1px 8px 1px rgba(37,99,235,.08)',
-        }}>
-          <label htmlFor="editor" style={{
-            fontWeight: 600,
-            color: '#2563EB',
-            letterSpacing: '.01em',
-            fontSize: 18,
-            marginBottom: 3,
-            display: 'block'
-          }}>Edit Text</label>
-          <textarea
-            id="editor"
-            value={text}
-            onChange={handleEdit}
-            placeholder="Type here..."
-            rows={6}
-            style={{
-              fontFamily: "'JetBrains Mono', 'Menlo', monospace",
-              width: '100%',
-              backgroundColor: '#fff',
-              color: '#22223b',
-              border: '1px solid #c7d2fe',
-              borderRadius: 8,
-              padding: '13px 14px',
-              fontSize: '1.09rem',
-              resize: 'vertical',
-              boxShadow: '0 1px 2px rgba(37,99,235,0.03)',
-              transition: 'border .17s, box-shadow .21s',
-              marginBottom: 5,
-            }}
-            maxLength={3000}
-            aria-label="Text editor"
-            autoComplete="off"
-          />
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'row',
-              justifyContent: 'flex-end',
-              gap: 8,
-              marginBottom: 6,
-            }}
-          >
-            <button style={btnPrimary} onClick={handleSave}>Save</button>
-            <button style={btnSecondary} onClick={handleLoad}>Load</button>
-            <button style={btnClear} onClick={handleClear}>Clear</button>
-          </div>
-        </fieldset>
-        {/* Typewriter Controls */}
-        <section style={{
-          margin: '9px 0 0 0',
-          padding: '18px 19px',
-          background: 'linear-gradient(100deg, #fff 90%, #f1f7fa 100%)',
-          borderRadius: 13,
-          boxShadow: '0 2px 13px 0 rgba(37,99,235,0.067)',
+        {/* Editor with save/load/clear */}
+        <Editor text={text} onChange={handleEdit} />
+        <div style={{
           display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'stretch',
+          flexDirection: 'row',
+          justifyContent: 'flex-end',
+          gap: 8,
+          marginBottom: 15,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 7 }}>
-            <h2 style={{
-              fontSize: '1.15rem',
-              fontWeight: 600,
-              color: '#2563EB',
-              margin: 0,
-              marginRight: 11,
-              letterSpacing: '.02em',
-            }}>Typewriter Preview</h2>
-            <button
-              style={{
-                ...btnPrimary,
-                padding: '7px 18px',
-                fontSize: '0.97em',
-                marginRight: 8,
-                opacity: playing ? 0.75 : 1
-              }}
-              onClick={playing ? handlePause : handleTypewriterPlay}
-              aria-label={playing ? "Pause" : "Play"}
-              disabled={text.length === 0}
-              tabIndex={0}
-            >
-              {playing ? 'Pause' : 'Play'}
-            </button>
-            <label style={{ marginLeft: 9, color: '#2563EB', fontWeight: 600 }}>Speed:</label>
-            <input
-              type="range"
-              min={MIN_TYPE_SPEED}
-              max={MAX_TYPE_SPEED}
-              step={1}
-              value={typeSpeed}
-              onChange={handleSpeedChange}
-              style={{ marginLeft: 8, marginRight: 5, verticalAlign: 'middle' }}
-              aria-label="Typing Speed"
-            />
-            <span style={{
-              marginLeft: 2,
-              color: '#374151',
-              fontSize: '0.95em'
-            }}>
-              {Math.round(1000/typeSpeed)} cps
-            </span>
-          </div>
-          <div
+          <button
             style={{
-              border: '1.5px solid #a5b4fc',
-              background: 'linear-gradient(90deg, #f1f5f9 95%, #e0edfa 100%)',
-              minHeight: 67,
-              borderRadius: 11,
-              margin: '2px 0 0 0',
-              fontFamily: "'JetBrains Mono', Menlo, monospace",
-              fontSize: '1.17em',
-              padding: '18px 16px 14px 16px',
-              color: '#111827',
-              position: 'relative',
-              whiteSpace: 'pre-line',
-              boxShadow: '0 3px 12px 0 rgba(37,99,235,0.01)',
-              letterSpacing: '.005em'
+              background: 'linear-gradient(90deg, #2563EB, #3181f7 92%)',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '8px',
+              boxShadow: '0 2px 8px rgba(37,99,235,0.07)',
+              padding: '11px 22px',
+              fontWeight: 600,
+              fontSize: '1em',
+              marginRight: 12,
+              cursor: 'pointer',
+              transition: 'opacity .2s, box-shadow .2s',
             }}
-            aria-live={playing ? 'polite' : 'off'}
+            onClick={handleSave}
           >
-            {displayed}
-            {(playing || (displayed.length !== 0 && displayed !== text)) &&
-              <Caret />
-            }
-          </div>
-        </section>
-        {/* Status message */}
+            Save
+          </button>
+          <button
+            style={{
+              background: 'linear-gradient(90deg, #F59E0B, #fde68a 90%)',
+              color: '#111827',
+              border: 'none',
+              borderRadius: '8px',
+              boxShadow: '0 2px 8px rgba(245,158,11,0.09)',
+              padding: '11px 22px',
+              fontWeight: 600,
+              fontSize: '1em',
+              marginRight: 12,
+              cursor: 'pointer',
+              transition: 'opacity .2s, box-shadow .2s',
+            }}
+            onClick={handleLoad}
+          >
+            Load
+          </button>
+          <button
+            style={{
+              background: 'linear-gradient(90deg, #EF4444, #fca5a5 90%)',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '11px 22px',
+              fontWeight: 600,
+              fontSize: '1em',
+              marginRight: 0,
+              boxShadow: '0 2px 8px rgba(239,68,68,0.09)',
+              cursor: 'pointer',
+              transition: 'opacity .2s, box-shadow .2s',
+            }}
+            onClick={handleClear}
+          >
+            Clear
+          </button>
+        </div>
+        {/* Controls */}
+        <TypewriterControls
+          playing={playing}
+          disabled={text.length === 0}
+          onPlay={handleTypewriterPlay}
+          onPause={handlePause}
+          onReset={handleReset}
+          onSpeedChange={handleSpeedChange}
+          speed={typeSpeed}
+          minSpeed={MIN_TYPE_SPEED}
+          maxSpeed={MAX_TYPE_SPEED}
+        />
+        {/* Typewriter Preview */}
+        <TypewriterDisplay
+          displayed={displayed}
+          showCaret={caretVisible}
+          isPlaying={playing}
+          fullText={text}
+        />
+        {/* Status */}
         {status && (
           <div
             role="status"
